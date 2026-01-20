@@ -2,8 +2,8 @@ name: RSS Guncelle
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Her 6 saatte bir otomatik çalışır
-  workflow_dispatch: # Manuel çalıştırma butonu ekler
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
       - name: RSS Olustur
         run: python guncelle.py
 
-     - name: Degisiklikleri kaydet
+      - name: Degisiklikleri kaydet
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
