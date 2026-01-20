@@ -8,7 +8,7 @@ from feedgen.feed import FeedGenerator
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD AYARLARI (Dokunmayin) ---
+    # --- HAYALET MOD AYARLARI ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -24,71 +24,73 @@ def haberleri_cek():
     try:
         print("Siteye baglaniliyor...")
         driver.get("https://gdh.digital/savunma")
-        time.sleep(10) # Ilk yukleme icin bekle
+        time.sleep(10)
         
-        # --- YENILIK: COKLU KAYDIRMA (Scroll Loop) ---
-        # Sayfayi 5 kez, her seferinde 1000 piksel asagi kaydir
-        print("Daha fazla haber icin asagi kaydiriliyor...")
-        for i in range(1, 6):
-            driver.execute_script(f"window.scrollTo(0, {i * 1200});")
-            time.sleep(3) # Her kaydirmada yuklenmesini bekle
+        # 1. Sayfayi parca parca asagi kaydir (Daha fazla haber icin)
+        print("Sayfa kaydiriliyor...")
+        for i in range(1, 5):
+            driver.execute_script(f"window.scrollTo(0, {i * 1000});")
+            time.sleep(2)
 
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Savunma Haberleri')
 
-        # Tum linkleri topla
-        tum_linkler = driver.find_elements(By.TAG_NAME, "a")
-        print(f"Toplam {len(tum_linkler)} link bulundu, ayiklaniyor...")
+        # 2. ONCE VERILERI TOPLA (Stale Element Hatasini Onlemek Icin)
+        # Elementleri direkt islemek yerine, link ve basliklari listeye aliyoruz.
+        ham_elementler = driver.find_elements(By.TAG_NAME, "a")
+        haber_verileri = []
+        
+        print(f"Toplam {len(ham_elementler)} ham link bulundu. Veriler aliniyor...")
 
+        for el in ham_elementler:
+            try:
+                # Link ve basligi metin olarak alip hafizaya atiyoruz
+                url = el.get_attribute('href')
+                baslik = el.get_attribute('innerText').strip() # innerText bazen text'ten daha iyidir
+                
+                # Title attribute kontrolu (Resim linkleri icin)
+                if not baslik:
+                    baslik = el.get_attribute('title')
+                
+                if url and "/savunma/" in url:
+                    haber_verileri.append({"link": url, "baslik": baslik})
+            except:
+                continue # Hatalı elementi atla
+
+        # 3. VERILERI ISLE VE RSS OLUSTUR
+        print(f"{len(haber_verileri)} aday haber isleniyor...")
+        
         eklenen = 0
         gorulenler = set()
 
-        for el in tum_linkler:
-            try:
-                link = el.get_attribute('href')
-                baslik = el.text.strip()
-                
-                # --- FILTRELEME ---
-                # 1. Link bos olmamali ve 'savunma' icermeli
-                # 2. Daha once eklenmemis olmali
-                if not link or "/savunma/" not in link or link in gorulenler:
-                    continue
-                
-                # 3. Baslik cok kisa olmamali (Menuleri eler)
-                # 4. Derece isareti (hava durumu) olmamali
-                if len(baslik) < 15 or "°" in baslik:
-                    # Metin yoksa title'a bak (Bazen resimlerin icindedir)
-                    alt_baslik = el.get_attribute('title')
-                    if alt_baslik and len(alt_baslik) > 15:
-                        baslik = alt_baslik
-                    else:
-                        continue
+        for veri in haber_verileri:
+            link = veri['link']
+            baslik = veri['baslik']
 
-                # RSS'e Ekle
-                fe = fg.add_entry()
-                fe.id(link)
-                fe.title(baslik)
-                fe.link(href=link)
-                
-                # Resim bulmaya calis (Opsiyonel)
-                try:
-                    img = el.find_element(By.TAG_NAME, "img").get_attribute("src")
-                    fe.description(f'<img src="{img}"/><br/>{baslik}')
-                except:
-                    fe.description(baslik)
-                
-                gorulenler.add(link)
-                eklenen += 1
-                
-                # Limit: 25 habere kadar al
-                if eklenen >= 25: break
-            except:
+            # Filtreler
+            if not link or link == "https://gdh.digital/savunma" or link in gorulenler:
+                continue
+            
+            # Baslik kontrolu (Bos veya cok kisa ise atla)
+            if not baslik or len(baslik) < 15 or "°" in baslik:
                 continue
 
+            fe = fg.add_entry()
+            fe.id(link)
+            fe.title(baslik)
+            fe.link(href=link)
+            fe.description(baslik)
+            
+            gorulenler.add(link)
+            eklenen += 1
+            
+            # 30 habere ulasinca dur
+            if eklenen >= 30: break
+
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"ISLEM TAMAM: {eklenen} haber RSS dosyasina yazildi.")
+        print(f"ISLEM TAMAM: {eklenen} haber RSS dosyasina basariyla yazildi.")
 
     except Exception as e:
         print(f"HATA: {e}")
