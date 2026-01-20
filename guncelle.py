@@ -17,16 +17,14 @@ def haberleri_cek():
     
     try:
         driver.get("https://gdh.digital/savunma")
-        time.sleep(15) # Sayfanın tam yüklenmesi için süreyi artırdık
+        time.sleep(15) 
         
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Gdh Savunma Haberleri')
 
-        # Haber linklerini topla
         haberler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
-        
         eklenen_sayisi = 0
         gorulen_linkler = set()
 
@@ -34,14 +32,11 @@ def haberleri_cek():
             link = haber.get_attribute('href')
             baslik = haber.text.strip()
 
-            # FİLTRELEME: 
-            # 1. Link ana sayfa olmamalı 
-            # 2. Başlık 15 karakterden kısa olmamalı (Hava durumu/Menü elemanlarını eler)
-            # 3. Başlık sadece sayı içermemeli (5° gibi)
             if not link or "https://gdh.digital/savunma" == link or link in gorulen_linkler:
                 continue
             
-            if len(baslik) < 15 or baslik.replace('°','').isdigit():
+            # FILTRE: Baslik 20 karakterden kisa ise veya hava durumu gibi derece iceriyorsa atla
+            if len(baslik) < 20 or "°" in baslik:
                 continue
 
             fe = fg.add_entry()
@@ -61,7 +56,6 @@ def haberleri_cek():
 
         fg.rss_file('gdh_savunma_detayli.xml')
         print(f"Bitti! {eklenen_sayisi} haber eklendi.")
-
     finally:
         driver.quit()
 
