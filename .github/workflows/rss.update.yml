@@ -24,10 +24,11 @@ jobs:
       - name: RSS Olustur
         run: python guncelle.py
 
-      - name: Degisiklikleri kaydet
+     - name: Degisiklikleri kaydet
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add gdh_savunma_detayli.xml
-          git commit -m "RSS guncellendi" || exit 0
-          git push
+          git commit -m "RSS guncellendi" || echo "Degisiklik yok"
+          git push origin main
