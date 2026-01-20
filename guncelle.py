@@ -17,15 +17,15 @@ def haberleri_cek():
     
     try:
         driver.get("https://gdh.digital/savunma")
-        time.sleep(12) # Sayfanın ve JS içeriklerinin tam yüklenmesi için süreyi artırdık
+        # Sayfanın yüklenmesi için süreyi artırdık
+        time.sleep(12) 
         
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Gdh Savunma Haberleri')
 
-        # Sadece haber linklerini içeren daha spesifik bir arama yapıyoruz
-        # Gdh haberleri genellikle belirli bir div yapısı içindedir
+        # Sadece belirli haber linklerini hedef alıyoruz
         haberler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
         
         eklenen_sayisi = 0
@@ -35,14 +35,15 @@ def haberleri_cek():
             link = haber.get_attribute('href')
             baslik = haber.text.strip()
 
-            # Filtreleme Kuralları:
-            # 1. Boş link veya ana sayfa linki olmamalı
+            # FİLTRELEME KURALLARI:
+            # 1. Boş link veya kategori sayfasının kendisi olmamalı
             # 2. Daha önce eklenmiş olmamalı
             # 3. Başlık çok kısa (örn: "5°", "Genel") veya boş olmamalı
             if not link or link == "https://gdh.digital/savunma" or link in gorulen_linkler:
                 continue
             
-            if len(baslik) < 15: # Kısa metinleri (hava durumu, kategori adı vb.) eliyoruz
+            # Başlıkta en az 15 karakter şartı (5° gibi verileri eler)
+            if len(baslik) < 15: 
                 continue
 
             fe = fg.add_entry()
