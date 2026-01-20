@@ -16,46 +16,59 @@ def haberleri_cek():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
+        # 1. Ana sayfadan haber linklerini topla
         driver.get("https://gdh.digital/savunma")
-        time.sleep(15) # Sayfanın tam yüklenmesi için bekliyoruz
+        time.sleep(12) 
         
+        # Sayfayı aşağı kaydır (Haberleri tetiklemek için)
+        driver.execute_script("window.scrollTo(0, 1500);")
+        time.sleep(5)
+        
+        elementler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
+        tum_linkler = []
+        for el in elementler:
+            l = el.get_attribute('href')
+            if l and l != "https://gdh.digital/savunma" and "/savunma/" in l:
+                if l not in tum_linkler:
+                    tum_linkler.append(l)
+
         fg = FeedGenerator()
-        fg.title('Gdh Savunma')
+        fg.title('Gdh Savunma | Detaylı Besleme')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
-        fg.description('Gdh Savunma Haberleri')
+        fg.description('Savunma sanayii haberleri içerik botu')
 
-        # Sadece gerçek haber linklerini hedefle
-        haberler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
-        eklenen_sayisi = 0
-        gorulen_linkler = set()
+        eklenen = 0
+        # 2. Her linke girip içeriği doğrula
+        for haber_url in tum_linkler[:10]: 
+            try:
+                driver.get(haber_url)
+                time.sleep(4) 
+                
+                # Gercek basligi h1'den al
+                gercek_baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
+                
+                # Filtre: Çok kısa metinleri ve derece sembollerini ele
+                if len(gercek_baslik) < 20 or "°" in gercek_baslik:
+                    continue
 
-        for haber in haberler:
-            link = haber.get_attribute('href')
-            baslik = haber.text.strip()
-
-            # Filtreleme: 
-            # 1. Başlık en az 30 karakter olmalı (Hava durumu ve menüleri eler)
-            # 2. İçinde derece sembolü olmamalı
-            if not link or link in gorulen_linkler or len(baslik) < 30 or "°" in baslik:
+                fe = fg.add_entry()
+                fe.id(haber_url)
+                fe.title(gercek_baslik)
+                fe.link(href=haber_url)
+                
+                try:
+                    img_url = driver.find_element(By.CSS_SELECTOR, "article img, img[class*='featured']").get_attribute('src')
+                    fe.description(f'<img src="{img_url}"/><br/>{gercek_baslik}')
+                except:
+                    fe.description(gercek_baslik)
+                
+                eklenen += 1
+            except:
                 continue
 
-            fe = fg.add_entry()
-            fe.id(link)
-            fe.title(baslik)
-            fe.link(href=link)
-            
-            try:
-                img_url = haber.find_element(By.TAG_NAME, "img").get_attribute('src')
-                fe.description(f'<img src="{img_url}"/><br/>{baslik}')
-            except:
-                fe.description(baslik)
-
-            gorulen_linkler.add(link)
-            eklenen_sayisi += 1
-            if eklenen_sayisi >= 15: break
-
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"Bitti! {eklenen_sayisi} haber eklendi.")
+        print(f"Bitti! {eklenen} haber XML'e işlendi.")
+
     finally:
         driver.quit()
 
