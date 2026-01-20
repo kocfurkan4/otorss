@@ -17,15 +17,14 @@ def haberleri_cek():
     
     try:
         driver.get("https://gdh.digital/savunma")
-        # Sayfanın yüklenmesi için süreyi artırdık
-        time.sleep(12) 
+        time.sleep(15) # Sayfanın tam yüklenmesi için süreyi artırdık
         
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Gdh Savunma Haberleri')
 
-        # Sadece belirli haber linklerini hedef alıyoruz
+        # Haber linklerini topla
         haberler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
         
         eklenen_sayisi = 0
@@ -35,15 +34,14 @@ def haberleri_cek():
             link = haber.get_attribute('href')
             baslik = haber.text.strip()
 
-            # FİLTRELEME KURALLARI:
-            # 1. Boş link veya kategori sayfasının kendisi olmamalı
-            # 2. Daha önce eklenmiş olmamalı
-            # 3. Başlık çok kısa (örn: "5°", "Genel") veya boş olmamalı
-            if not link or link == "https://gdh.digital/savunma" or link in gorulen_linkler:
+            # FİLTRELEME: 
+            # 1. Link ana sayfa olmamalı 
+            # 2. Başlık 15 karakterden kısa olmamalı (Hava durumu/Menü elemanlarını eler)
+            # 3. Başlık sadece sayı içermemeli (5° gibi)
+            if not link or "https://gdh.digital/savunma" == link or link in gorulen_linkler:
                 continue
             
-            # Başlıkta en az 15 karakter şartı (5° gibi verileri eler)
-            if len(baslik) < 15: 
+            if len(baslik) < 15 or baslik.replace('°','').isdigit():
                 continue
 
             fe = fg.add_entry()
@@ -51,10 +49,8 @@ def haberleri_cek():
             fe.title(baslik)
             fe.link(href=link)
             
-            # Resim çekme denemesi
             try:
-                img_tag = haber.find_element(By.TAG_NAME, "img")
-                img_url = img_tag.get_attribute('src')
+                img_url = haber.find_element(By.TAG_NAME, "img").get_attribute('src')
                 fe.description(f'<img src="{img_url}"/><br/>{baslik}')
             except:
                 fe.description(baslik)
@@ -64,7 +60,7 @@ def haberleri_cek():
             if eklenen_sayisi >= 15: break
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"Bitti! {eklenen_sayisi} gerçek haber yakalandı.")
+        print(f"Bitti! {eklenen_sayisi} haber eklendi.")
 
     finally:
         driver.quit()
