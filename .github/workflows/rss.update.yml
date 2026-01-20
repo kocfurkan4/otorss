@@ -1,0 +1,33 @@
+name: RSS Guncelle
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Her 6 saatte bir otomatik çalışır
+  workflow_dispatch: # Manuel çalıştırma butonu ekler
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu kopyala
+        uses: actions/checkout@v3
+
+      - name: Python kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri yukle
+        run: |
+          pip install -r requirements.txt
+
+      - name: RSS Olustur
+        run: python guncelle.py
+
+      - name: Degisiklikleri kaydet
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add gdh_savunma_detayli.xml
+          git commit -m "RSS guncellendi" || exit 0
+          git push
