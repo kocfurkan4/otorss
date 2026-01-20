@@ -1,79 +1,58 @@
-import time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
+import requests
 from feedgen.feed import FeedGenerator
+from datetime import datetime
 
 def haberleri_cek():
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    # Gdh'ın arka planda veri çektiği API adresi (Savunma kategorisi için)
+    # Not: Bu URL sitenin mobil/web veri yoludur.
+    api_url = "https://gdh.digital/api/posts?category=savunma&limit=15"
     
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    try:
-        # 1. Ana sayfadan haber linklerini ayıkla
-        driver.get("https://gdh.digital/savunma")
-        time.sleep(12) 
-        
-        # Sayfayı haberlerin yüklenmesi için aşağı kaydır
-        driver.execute_script("window.scrollTo(0, 1500);")
-        time.sleep(5)
-        
-        elementler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
-        tum_linkler = []
-        for el in elementler:
-            l = el.get_attribute('href')
-            # Kategori linkini ve tekrarları ele
-            if l and l != "https://gdh.digital/savunma" and "/savunma/" in l:
-                if l not in tum_linkler:
-                    tum_linkler.append(l)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
+    try:
+        response = requests.get(api_url, headers=headers, timeout=20)
+        data = response.json()
+        
         fg = FeedGenerator()
-        fg.title('Gdh Savunma | Tam Besleme')
+        fg.title('Gdh Savunma | Hızlı Besleme')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
-        fg.description('Savunma sanayii haberleri botu')
+        fg.description('Savunma sanayii haberleri API botu')
+        fg.language('tr')
 
         eklenen = 0
-        # 2. Tespit edilen haberlerin içine girip gerçek başlığı al
-        for haber_url in tum_linkler[:10]: # Performans için son 10 haberi tara
+        # API'den gelen veriyi işle
+        # Gdh API yapısına göre 'posts' veya direkt liste dönebilir
+        posts = data.get('posts', data) if isinstance(data, dict) else data
+
+        for post in posts:
             try:
-                driver.get(haber_url)
-                time.sleep(4) 
-                
-                # Gerçek başlık genellikle h1 etiketindedir
-                gercek_baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
-                
-                # "5°" gibi verileri ve çok kısa başlıkları filtrele
-                if len(gercek_baslik) < 20 or "°" in gercek_baslik:
+                # API'den başlık, link ve resim bilgilerini al
+                baslik = post.get('title', '').strip()
+                slug = post.get('slug', '')
+                link = f"https://gdh.digital/savunma/{slug}"
+                resim = post.get('featured_image', '')
+
+                # 5° gibi verileri engellemek için filtre
+                if not baslik or len(baslik) < 20 or "°" in baslik:
                     continue
 
                 fe = fg.add_entry()
-                fe.id(haber_url)
-                fe.title(gercek_baslik)
-                fe.link(href=haber_url)
-                
-                # Öne çıkan görseli bulmaya çalış
-                try:
-                    img_url = driver.find_element(By.CSS_SELECTOR, "article img, .post-content img, img[class*='featured']").get_attribute('src')
-                    fe.description(f'<img src="{img_url}"/><br/>{gercek_baslik}')
-                except:
-                    fe.description(gercek_baslik)
+                fe.id(link)
+                fe.title(baslik)
+                fe.link(href=link)
+                fe.description(f'<img src="{resim}"/><br/>{baslik}')
                 
                 eklenen += 1
             except:
                 continue
 
-        # XML Dosyasını Oluştur
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"Bitti! {eklenen} haber başarıyla XML'e eklendi.")
+        print(f"API üzerinden {eklenen} haber çekildi.")
 
-    finally:
-        driver.quit()
+    except Exception as e:
+        print(f"Hata: {e}")
 
 if __name__ == "__main__":
     haberleri_cek()
