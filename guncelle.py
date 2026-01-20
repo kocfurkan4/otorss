@@ -8,7 +8,7 @@ from feedgen.feed import FeedGenerator
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD (Guvenlik Duvari Asici) ---
+    # --- HAYALET MOD (Cloudflare ve Bot Koruması İçin) ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -20,101 +20,113 @@ def haberleri_cek():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     try:
-        # 1. ADIM: LINKLERI TOPLA
-        print("Ana sayfa taranıyor...")
+        print("1. ADIM: Ana sayfa taranıyor...")
         driver.get("https://gdh.digital/savunma")
         time.sleep(8)
+        
+        # Sayfayı aşağı kaydır (Haberlerin yüklenmesi için)
+        print("   Sayfa kaydırılıyor...")
         driver.execute_script("window.scrollTo(0, 2000);")
-        time.sleep(3)
+        time.sleep(4)
 
-        # Sadece linkleri toplayalim
-        ham_elementler = driver.find_elements(By.CSS_SELECTOR, "a[href*='/savunma/']")
+        # Sadece linkleri toplayalım
+        # BURASI KRİTİK: Sadece içinde '/haber/' geçen linkleri alıyoruz.
+        ham_elementler = driver.find_elements(By.TAG_NAME, "a")
         haber_linkleri = []
+        
+        print(f"   Linkler filtreleniyor (Kriter: '/haber/')...")
+        
         for el in ham_elementler:
             try:
                 url = el.get_attribute('href')
-                if url and url not in haber_linkleri and url != "https://gdh.digital/savunma":
+                
+                # --- FİLTRELEME ---
+                if not url: continue
+                
+                # 1. Link kesinlikle '/haber/' içermeli (Shorts/Video engeli)
+                if "/haber/" not in url:
+                    continue
+                
+                # 2. Ana sayfa veya kategori linki olmamalı
+                if url == "https://gdh.digital/haber" or len(url) < 35:
+                    continue
+
+                if url not in haber_linkleri:
                     haber_linkleri.append(url)
             except:
                 continue
 
-        print(f"Toplam {len(haber_linkleri)} link bulundu. Detaylı tarama başlıyor...")
+        print(f"   Toplam {len(haber_linkleri)} adet 'haber' formatında makale bulundu.")
 
         fg = FeedGenerator()
-        fg.title('Gdh Savunma | Tam İçerik')
+        fg.title('Gdh Savunma | Tam Makale')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
-        fg.description('Savunma haberleri tam metin akışı')
+        fg.description('Savunma sanayii makaleleri (Tam metin)')
 
         eklenen = 0
         
-        # 2. ADIM: HER LINKIN ICINE GIR (Deep Crawl)
-        # Performans icin son 10 haberi cekiyoruz (Sayiyi artirabilirsin)
+        # 2. ADIM: HER HABERİN İÇİNE GİR
+        # Performans için son 10 haberi çekiyoruz
         for link in haber_linkleri[:10]:
             try:
+                print(f"   Okunuyor: {link}")
                 driver.get(link)
-                time.sleep(3) # Sayfanin iceriginin yuklenmesi icin bekle
+                time.sleep(3) # İçeriğin yüklenmesi için bekle
                 
-                # --- BASLIK BULMA ---
+                # --- BAŞLIK AL ---
                 try:
                     baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
                 except:
-                    # h1 yoksa title'dan al
-                    baslik = driver.title.split('|')[0].strip()
+                    continue # Başlığı olmayan sayfa bozuktur
 
-                if not baslik or len(baslik) < 10:
-                    continue
-
-                # --- RESIM BULMA ---
+                # --- RESİM AL ---
                 resim_html = ""
                 try:
-                    # Makalenin ana resmini bulmaya calis
                     img_elem = driver.find_element(By.CSS_SELECTOR, "article img, .post-content img, figure img")
                     img_src = img_elem.get_attribute("src")
                     if img_src:
-                        resim_html = f'<img src="{img_src}" style="width:100%;"/><br/><br/>'
+                        resim_html = f'<img src="{img_src}" style="width:100%; display:block;"/><br/>'
                 except:
                     pass
 
-                # --- TUM METNI BULMA (Paragraf Birlestirme) ---
-                # Burasi cok onemli: Aradaki resimleri/sesleri atlayip sadece <p> etiketlerini alir
+                # --- TAM METİN AL (Paragraf Birleştirme) ---
                 full_text = ""
                 try:
-                    # Makale govdesindeki tum paragraflari bul
-                    paragraflar = driver.find_elements(By.CSS_SELECTOR, "article p, .content p, .post-body p, main p")
+                    # 'article' etiketi içindeki tüm 'p' (paragraf) etiketlerini bul
+                    paragraflar = driver.find_elements(By.CSS_SELECTOR, "article p, .content p, .post-body p")
                     
                     text_parts = []
                     for p in paragraflar:
                         text = p.text.strip()
-                        # Bos veya cok kisa (reklam/tarih vb.) paragraflari alma
+                        # Reklam metinlerini veya boş satırları atla
                         if len(text) > 20:
                             text_parts.append(text)
                     
-                    # Paragraflari birlestir
+                    # Paragrafları alt alta birleştir
                     full_text = "<br/><br/>".join(text_parts)
                 except:
-                    full_text = "Icerik alinamadi."
+                    pass
 
-                # Eger metin cekemediysek RSS'e ekleme
-                if len(full_text) < 50:
-                    continue
+                # Eğer metin çekemediysek (Sadece resim varsa) yine de ekle ama kısa olsun
+                if not full_text:
+                    full_text = "Haber detayı için linke tıklayın."
 
-                # RSS KAYDI
+                # --- RSS KAYDI ---
                 fe = fg.add_entry()
                 fe.id(link)
                 fe.title(baslik)
                 fe.link(href=link)
-                # Resim + Tam Metin seklinde kaydet
+                # Resim + Metin formatında açıklama
                 fe.description(f"{resim_html}{full_text}")
                 
-                print(f"Eklendi: {baslik[:30]}...")
                 eklenen += 1
 
             except Exception as e:
-                print(f"Hata ({link}): {e}")
+                print(f"   Hata: {e}")
                 continue
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"ISLEM TAMAM: {eklenen} tam içerikli haber oluşturuldu.")
+        print(f"İŞLEM TAMAM: {eklenen} makale başarıyla eklendi.")
 
     except Exception as e:
         print(f"GENEL HATA: {e}")
