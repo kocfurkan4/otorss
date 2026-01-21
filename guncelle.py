@@ -20,117 +20,119 @@ def haberleri_cek():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     try:
-        print("1. ADIM: Site taranıyor...")
+        print("1. ADIM: Siteye giriliyor...")
         driver.get("https://gdh.digital/savunma")
-        time.sleep(8)
-        driver.execute_script("window.scrollTo(0, 2000);")
-        time.sleep(4)
+        time.sleep(5) # Sayfanın ilk yüklenişi
 
-        # LINKLERI TOPLA
-        ham_elementler = driver.find_elements(By.TAG_NAME, "a")
         haber_linkleri = []
-        for el in ham_elementler:
+        
+        # --- DÜZELTME 1: MANŞETLERİ KAÇIRMAMAK İÇİN İKİ AŞAMALI TARAMA ---
+        
+        # A) Önce HİÇ kaydırmadan en tepedeki (Manşet/Slider) linkleri al
+        print("   Manşetler taranıyor...")
+        linkler_tepe = driver.find_elements(By.TAG_NAME, "a")
+        for el in linkler_tepe:
             try:
                 url = el.get_attribute('href')
-                # Sadece makaleler (/haber/)
+                if url and "/haber/" in url and url not in haber_linkleri:
+                    haber_linkleri.append(url)
+            except:
+                continue
+
+        # B) Şimdi sayfayı aşağı kaydır ve listenin geri kalanını al
+        print("   Aşağı iniliyor (Liste haberleri)...")
+        driver.execute_script("window.scrollTo(0, 1500);")
+        time.sleep(3)
+        
+        linkler_alt = driver.find_elements(By.TAG_NAME, "a")
+        for el in linkler_alt:
+            try:
+                url = el.get_attribute('href')
                 if url and "/haber/" in url and url not in haber_linkleri:
                     haber_linkleri.append(url)
             except:
                 continue
         
-        print(f"Toplam {len(haber_linkleri)} makale bulundu. İçerik çekiliyor...")
+        print(f"Toplam {len(haber_linkleri)} benzersiz haber bulundu. İçerik çekiliyor...")
 
         fg = FeedGenerator()
-        fg.title('Gdh Savunma | Tam Metin')
+        fg.title('Gdh Savunma | Tam Kapsam')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Savunma haberleri')
 
         eklenen = 0
         
-        # 2. ADIM: ICERIK CEKME (KONTEYNER YONTEMI)
-        for link in haber_linkleri[:12]:
+        # 2. ADIM: İÇERİK ÇEKME
+        for link in haber_linkleri[:15]: # İlk 15 haberi al (Manşetler dahil)
             try:
                 driver.get(link)
-                time.sleep(3) 
+                time.sleep(2) 
                 
-                # --- BAŞLIK ---
+                # Başlık
                 try:
                     baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
                 except:
                     continue
 
-                # --- RESİM ---
+                # Resim
                 resim_html = ""
                 try:
-                    # Haberin en büyük resmini bulmaya çalış
-                    img_elem = driver.find_element(By.CSS_SELECTOR, "article img, main img, figure img")
+                    img_elem = driver.find_element(By.CSS_SELECTOR, "article img, main img")
                     img_src = img_elem.get_attribute("src")
                     if img_src:
                         resim_html = f'<img src="{img_src}" style="width:100%; display:block;"/><br/><br/>'
                 except:
                     pass
 
-                # --- TAM METİN (YENİ YÖNTEM: GÖVDE TARAMA) ---
+                # --- DÜZELTME 2: KARAKTER SINIRI GEVŞETİLDİ ---
                 full_text = ""
                 try:
-                    # 1. Haberin ana gövdesini bul (article veya main etiketi)
-                    # Gdh muhtemelen 'article' veya belirli bir ID kullanıyor
+                    # Gövdeyi bul
                     govde = None
                     try:
                         govde = driver.find_element(By.TAG_NAME, "article")
                     except:
-                        try:
-                            govde = driver.find_element(By.TAG_NAME, "main")
-                        except:
-                            # Hicbiri yoksa body'den alacagiz (Son care)
-                            govde = driver.find_element(By.TAG_NAME, "body")
+                        govde = driver.find_element(By.TAG_NAME, "main")
 
-                    # 2. Gövdenin içindeki TÜM GÖRÜNÜR METNİ al (.text özelliği)
-                    # Bu özellik HTML taglerini siler, sadece kullanıcıya görünen yazıyı verir.
                     ham_metin = govde.text 
-                    
-                    # 3. Metni satır satır temizle
                     satirlar = ham_metin.split('\n')
                     temiz_satirlar = []
                     
                     for satir in satirlar:
                         satir = satir.strip()
-                        # FILTRELEME:
-                        # - Başlık ile aynı olan satırı atla
-                        # - Çok kısa satırları (Menü, Tarih, Yazar, Reklam) atla
-                        # - 'Abone ol', 'Takip et' gibi gereksizleri atla
-                        if len(satir) > 50 and satir != baslik and "Haberler" not in satir and "Abone" not in satir:
-                            temiz_satirlar.append(satir)
+                        # ESKİ KOD: if len(satir) > 50 (Çok agresifti)
+                        # YENİ KOD: if len(satir) > 25 (Kısa cümleleri de alır)
+                        if len(satir) > 25 and satir != baslik:
+                            # Yasaklı kelimeler (reklam/menu vb.)
+                            if "Abone Ol" not in satir and "Takip Et" not in satir:
+                                temiz_satirlar.append(satir)
                     
-                    # 4. Satırları HTML paragrafı (<br><br>) ile birleştir
                     full_text = "<br/><br/>".join(temiz_satirlar)
 
                 except Exception as e:
-                    print(f"Metin hatası: {e}")
+                    pass
 
-                # Eğer hala metin boşsa
-                if len(full_text) < 50:
-                    full_text = "Haber metni çekilemedi, lütfen kaynağa gidin."
+                if len(full_text) < 20:
+                    full_text = "Haber metni okunamadı."
 
-                # --- KAYDET ---
+                # Kaydet
                 fe = fg.add_entry()
                 fe.id(link)
                 fe.title(baslik)
                 fe.link(href=link)
                 fe.description(f"{resim_html}{full_text}")
                 
-                print(f"Eklendi: {baslik[:30]}...")
+                print(f"Eklendi: {baslik}")
                 eklenen += 1
 
             except Exception as e:
-                print(f"Hata: {e}")
                 continue
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"İŞLEM TAMAM: {eklenen} haber eklendi.")
+        print(f"İŞLEM TAMAM: {eklenen} haber başarıyla eklendi.")
 
     except Exception as e:
-        print(f"GENEL HATA: {e}")
+        print(f"HATA: {e}")
     finally:
         driver.quit()
 
