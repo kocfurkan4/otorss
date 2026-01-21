@@ -10,7 +10,7 @@ from feedgen.feed import FeedGenerator
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD AYARLARI ---
+    # --- HAYALET MOD ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -29,7 +29,7 @@ def haberleri_cek():
         haber_linkleri = []
         
         # 1. LINKLERI TOPLA
-        # Once tepedeki manşetler
+        # Tepe (Manşet)
         linkler_tepe = driver.find_elements(By.TAG_NAME, "a")
         for el in linkler_tepe:
             try:
@@ -38,7 +38,7 @@ def haberleri_cek():
                     haber_linkleri.append(url)
             except: continue
 
-        # Asagi kaydir ve devamini al
+        # Aşağı (Liste)
         driver.execute_script("window.scrollTo(0, 1500);")
         time.sleep(3)
         linkler_alt = driver.find_elements(By.TAG_NAME, "a")
@@ -59,7 +59,7 @@ def haberleri_cek():
 
         eklenen = 0
         
-        # 2. ICERIK DETAYLANDIRMA
+        # 2. İÇERİK TARAMA
         for link in haber_linkleri[:15]: 
             try:
                 driver.get(link)
@@ -92,31 +92,43 @@ def haberleri_cek():
                     satirlar = ham_metin.split('\n')
                     temiz_satirlar = []
                     
+                    # --- YENİ BİTİRME SİNYALLERİ ---
+                    # Bu kelimelerden biri geçerse haber bitmiş demektir.
+                    bitis_kelimeleri = [
+                        "takip edebilirsiniz", 
+                        "takip edin", 
+                        "gdh digital", 
+                        "sosyal medya",
+                        "------"
+                    ]
+
                     for satir in satirlar:
-                        satir = satir.strip()
+                        satir_temiz = satir.strip()
+                        satir_kucuk = satir_temiz.lower() # Küçük harfe çevirip kontrol et
                         
-                        # A) TARIH AYIKLAMA (Son Güncelleme: XX.XX.XXXX - XX:XX)
-                        if "Son Güncelleme" in satir:
+                        # A) TARİH ALMA
+                        if "Son Güncelleme" in satir_temiz:
                             try:
-                                tarih_str = satir.replace("Son Güncelleme:", "").strip()
+                                tarih_str = satir_temiz.replace("Son Güncelleme:", "").strip()
                                 dt = datetime.strptime(tarih_str, "%d.%m.%Y - %H:%M")
                                 tz = pytz.timezone('Europe/Istanbul')
                                 yayin_tarihi = tz.localize(dt)
                             except: pass
                             continue 
 
-                        # B) KESİCİ (Haber Bitişi)
-                        if "takip edebilirsiniz" in satir: 
-                            break 
+                        # B) ÇOKLU KESİCİ (Bitir Komutu)
+                        # Eğer satırda bitiş kelimelerinden HERHANGİ BİRİ varsa döngüyü kır
+                        if any(kelime in satir_kucuk for kelime in bitis_kelimeleri):
+                            break
                         
-                        # C) FİLTRELER
-                        if "Kültür sanat" in satir: continue
-                        if "Abone Ol" in satir: continue
-                        if satir == baslik: continue 
+                        # C) GEREKSİZLERİ ATLA
+                        if "Kültür sanat" in satir_temiz: continue
+                        if "Abone Ol" in satir_temiz: continue
+                        if satir_temiz == baslik: continue 
 
-                        # D) Metni Ekle (Kısa cümleler dahil)
-                        if len(satir) > 25:
-                            temiz_satirlar.append(satir)
+                        # D) METNE EKLE (25 karakterden uzunsa)
+                        if len(satir_temiz) > 25:
+                            temiz_satirlar.append(satir_temiz)
                     
                     full_text = "<br/><br/>".join(temiz_satirlar)
 
@@ -124,9 +136,9 @@ def haberleri_cek():
                     pass
 
                 if len(full_text) < 20:
-                    full_text = "İçerik detayı için habere gidin."
+                    full_text = "Haber detayları için kaynağa gidiniz."
 
-                # --- RSS KAYDI ---
+                # --- KAYIT ---
                 fe = fg.add_entry()
                 fe.id(link)
                 fe.link(href=link)
