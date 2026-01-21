@@ -28,8 +28,8 @@ def haberleri_cek():
 
         haber_linkleri = []
         
-        # 1. LINKLERI TOPLA
-        # Tepe (Manşet)
+        # 1. LINK TOPLAMA (Manşet + Liste)
+        # Manşetler
         linkler_tepe = driver.find_elements(By.TAG_NAME, "a")
         for el in linkler_tepe:
             try:
@@ -38,7 +38,7 @@ def haberleri_cek():
                     haber_linkleri.append(url)
             except: continue
 
-        # Aşağı (Liste)
+        # Aşağı Liste
         driver.execute_script("window.scrollTo(0, 1500);")
         time.sleep(3)
         linkler_alt = driver.find_elements(By.TAG_NAME, "a")
@@ -59,7 +59,7 @@ def haberleri_cek():
 
         eklenen = 0
         
-        # 2. İÇERİK TARAMA
+        # 2. DETAYLI İÇERİK ANALİZİ
         for link in haber_linkleri[:15]: 
             try:
                 driver.get(link)
@@ -79,56 +79,70 @@ def haberleri_cek():
                         resim_html = f'<img src="{img_src}" style="width:100%; display:block;"/><br/><br/>'
                 except: pass
 
-                # --- METİN VE TARİH ---
+                # --- GELİŞMİŞ METİN TOPLAYICI ---
                 full_text = ""
                 yayin_tarihi = None 
 
                 try:
+                    # Gövdeyi bul
                     govde = None
                     try: govde = driver.find_element(By.TAG_NAME, "article")
                     except: govde = driver.find_element(By.TAG_NAME, "main")
 
-                    ham_metin = govde.text 
-                    satirlar = ham_metin.split('\n')
+                    # BURASI YENİ: Sadece düz yazı değil, HTML elemanlarını türüne göre topluyoruz.
+                    # p: Paragraf, h2-h3: Ara başlıklar, li: Liste maddeleri, blockquote: Alıntılar
+                    elementler = govde.find_elements(By.CSS_SELECTOR, "p, h2, h3, h4, li, blockquote, div.content-text")
+                    
                     temiz_satirlar = []
                     
-                    # --- YENİ BİTİRME SİNYALLERİ ---
-                    # Bu kelimelerden biri geçerse haber bitmiş demektir.
-                    bitis_kelimeleri = [
-                        "takip edebilirsiniz", 
-                        "takip edin", 
-                        "gdh digital", 
-                        "sosyal medya",
-                        "------"
-                    ]
+                    # Bitiş Kelimeleri (Görünce haberi kes)
+                    bitis_kelimeleri = ["takip edebilirsiniz", "takip edin", "gdh digital", "sosyal medya", "------"]
 
-                    for satir in satirlar:
-                        satir_temiz = satir.strip()
-                        satir_kucuk = satir_temiz.lower() # Küçük harfe çevirip kontrol et
+                    tarih_bulundu = False
+
+                    for el in elementler:
+                        # Metni al
+                        satir = el.text.strip()
+                        satir_kucuk = satir.lower()
                         
-                        # A) TARİH ALMA
-                        if "Son Güncelleme" in satir_temiz:
-                            try:
-                                tarih_str = satir_temiz.replace("Son Güncelleme:", "").strip()
-                                dt = datetime.strptime(tarih_str, "%d.%m.%Y - %H:%M")
-                                tz = pytz.timezone('Europe/Istanbul')
-                                yayin_tarihi = tz.localize(dt)
-                            except: pass
+                        if not satir: continue
+
+                        # A) TARİH (Varsa al ve metne ekleme)
+                        if "Son Güncelleme" in satir:
+                            if not tarih_bulundu: # Sadece ilk bulduğunu al
+                                try:
+                                    tarih_str = satir.replace("Son Güncelleme:", "").strip()
+                                    dt = datetime.strptime(tarih_str, "%d.%m.%Y - %H:%M")
+                                    tz = pytz.timezone('Europe/Istanbul')
+                                    yayin_tarihi = tz.localize(dt)
+                                    tarih_bulundu = True
+                                except: pass
                             continue 
 
-                        # B) ÇOKLU KESİCİ (Bitir Komutu)
-                        # Eğer satırda bitiş kelimelerinden HERHANGİ BİRİ varsa döngüyü kır
+                        # B) BİTİRİCİ (Haberi Kes)
                         if any(kelime in satir_kucuk for kelime in bitis_kelimeleri):
+                            # Eğer bu satır çok kısaysa (sadece imza ise) direk bitir.
+                            # Eğer uzun bir paragrafın içindeyse (bazen oluyor), o paragrafı alma ve bitir.
                             break
                         
-                        # C) GEREKSİZLERİ ATLA
-                        if "Kültür sanat" in satir_temiz: continue
-                        if "Abone Ol" in satir_temiz: continue
-                        if satir_temiz == baslik: continue 
+                        # C) FİLTRELER (Gereksizleri At)
+                        if "Kültür sanat" in satir: continue
+                        if "Abone Ol" in satir: continue
+                        if "İlgili Haberler" in satir: continue
+                        if satir == baslik: continue 
 
-                        # D) METNE EKLE (25 karakterden uzunsa)
-                        if len(satir_temiz) > 25:
-                            temiz_satirlar.append(satir_temiz)
+                        # D) EKRANA YAZDIRMA KURALI
+                        # Başlık etiketleri (h2, h3) ise kalın yazdır
+                        tag_name = el.tag_name.lower()
+                        
+                        if tag_name in ['h2', 'h3', 'h4']:
+                            temiz_satirlar.append(f"<b>{satir}</b>")
+                        elif tag_name == 'li':
+                            temiz_satirlar.append(f"• {satir}")
+                        else:
+                            # Normal paragraf - Karakter sınırını 15'e indirdik!
+                            if len(satir) > 15:
+                                temiz_satirlar.append(satir)
                     
                     full_text = "<br/><br/>".join(temiz_satirlar)
 
@@ -136,7 +150,7 @@ def haberleri_cek():
                     pass
 
                 if len(full_text) < 20:
-                    full_text = "Haber detayları için kaynağa gidiniz."
+                    full_text = "Haber detayı için kaynağa gidiniz."
 
                 # --- KAYIT ---
                 fe = fg.add_entry()
