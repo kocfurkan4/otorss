@@ -7,10 +7,11 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from feedgen.feed import FeedGenerator
+from newspaper import Article # AI Kütüphanesi
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD ---
+    # --- HAYALET MOD (Cloudflare engelini aşmak için) ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -28,7 +29,9 @@ def haberleri_cek():
 
         haber_linkleri = []
         
-        # 1. LINK TOPLAMA (Manşet + Liste)
+        # 1. LINKLERI TOPLA
+        print("Linkler toplanıyor...")
+        
         # Manşetler
         linkler_tepe = driver.find_elements(By.TAG_NAME, "a")
         for el in linkler_tepe:
@@ -49,7 +52,7 @@ def haberleri_cek():
                     haber_linkleri.append(url)
             except: continue
         
-        print(f"Toplam {len(haber_linkleri)} makale bulundu.")
+        print(f"Toplam {len(haber_linkleri)} link bulundu. AI analizi başlıyor...")
 
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
@@ -59,120 +62,74 @@ def haberleri_cek():
 
         eklenen = 0
         
-        # 2. DETAYLI İÇERİK ANALİZİ
+        # 2. AI ILE ANALIZ (NEWSPAPER3K)
         for link in haber_linkleri[:15]: 
             try:
+                # Once Selenium ile sayfayi ac (Guvenlik duvarini asmak icin)
                 driver.get(link)
-                time.sleep(2) 
+                time.sleep(2)
                 
-                # --- BAŞLIK ---
-                try:
-                    baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
-                except: continue
+                # HTML kaynagini alip AI kütüphanesine veriyoruz
+                html_kaynagi = driver.page_source
+                
+                makale = Article(link)
+                makale.set_html(html_kaynagi) # Cloudflare'e takilmamak icin Selenium'un actigi kaynagi veriyoruz
+                makale.parse() # AI okumaya başlıyor
+                
+                # Verileri Cek
+                baslik = makale.title
+                resim_url = makale.top_image
+                ham_metin = makale.text # Otomatik temizlenmiş metin
+                
+                # Ufak bir son temizlik (Takip et yazılarını silmek için)
+                temiz_satirlar = []
+                for satir in ham_metin.split('\n'):
+                    satir = satir.strip()
+                    if not satir: continue
+                    
+                    # AI'ın kaçırabileceği imza kısımlarını elle kesiyoruz
+                    kucuk_satir = satir.lower()
+                    if "takip edebilirsiniz" in kucuk_satir: break
+                    if "gdh digital" in kucuk_satir and len(satir) < 30: break
+                    if "------" in kucuk_satir: break
+                    
+                    temiz_satirlar.append(satir)
+                
+                full_text = "<br/><br/>".join(temiz_satirlar)
 
-                # --- RESİM ---
+                # Tarih (AI otomatik bulur)
+                try:
+                    tarih = makale.publish_date
+                    if tarih:
+                        tarih = tarih.replace(tzinfo=pytz.timezone('Europe/Istanbul'))
+                    else:
+                        # Bulamazsa şimdiği koy
+                        tarih = datetime.now(pytz.timezone('Europe/Istanbul'))
+                except:
+                    tarih = datetime.now(pytz.timezone('Europe/Istanbul'))
+
+                # Resim HTML kodu
                 resim_html = ""
-                try:
-                    img_elem = driver.find_element(By.CSS_SELECTOR, "article img, main img")
-                    img_src = img_elem.get_attribute("src")
-                    if img_src:
-                        resim_html = f'<img src="{img_src}" style="width:100%; display:block;"/><br/><br/>'
-                except: pass
-
-                # --- GELİŞMİŞ METİN TOPLAYICI ---
-                full_text = ""
-                yayin_tarihi = None 
-
-                try:
-                    # Gövdeyi bul
-                    govde = None
-                    try: govde = driver.find_element(By.TAG_NAME, "article")
-                    except: govde = driver.find_element(By.TAG_NAME, "main")
-
-                    # BURASI YENİ: Sadece düz yazı değil, HTML elemanlarını türüne göre topluyoruz.
-                    # p: Paragraf, h2-h3: Ara başlıklar, li: Liste maddeleri, blockquote: Alıntılar
-                    elementler = govde.find_elements(By.CSS_SELECTOR, "p, h2, h3, h4, li, blockquote, div.content-text")
-                    
-                    temiz_satirlar = []
-                    
-                    # Bitiş Kelimeleri (Görünce haberi kes)
-                    bitis_kelimeleri = ["takip edebilirsiniz", "takip edin", "gdh digital", "sosyal medya", "------"]
-
-                    tarih_bulundu = False
-
-                    for el in elementler:
-                        # Metni al
-                        satir = el.text.strip()
-                        satir_kucuk = satir.lower()
-                        
-                        if not satir: continue
-
-                        # A) TARİH (Varsa al ve metne ekleme)
-                        if "Son Güncelleme" in satir:
-                            if not tarih_bulundu: # Sadece ilk bulduğunu al
-                                try:
-                                    tarih_str = satir.replace("Son Güncelleme:", "").strip()
-                                    dt = datetime.strptime(tarih_str, "%d.%m.%Y - %H:%M")
-                                    tz = pytz.timezone('Europe/Istanbul')
-                                    yayin_tarihi = tz.localize(dt)
-                                    tarih_bulundu = True
-                                except: pass
-                            continue 
-
-                        # B) BİTİRİCİ (Haberi Kes)
-                        if any(kelime in satir_kucuk for kelime in bitis_kelimeleri):
-                            # Eğer bu satır çok kısaysa (sadece imza ise) direk bitir.
-                            # Eğer uzun bir paragrafın içindeyse (bazen oluyor), o paragrafı alma ve bitir.
-                            break
-                        
-                        # C) FİLTRELER (Gereksizleri At)
-                        if "Kültür sanat" in satir: continue
-                        if "Abone Ol" in satir: continue
-                        if "İlgili Haberler" in satir: continue
-                        if satir == baslik: continue 
-
-                        # D) EKRANA YAZDIRMA KURALI
-                        # Başlık etiketleri (h2, h3) ise kalın yazdır
-                        tag_name = el.tag_name.lower()
-                        
-                        if tag_name in ['h2', 'h3', 'h4']:
-                            temiz_satirlar.append(f"<b>{satir}</b>")
-                        elif tag_name == 'li':
-                            temiz_satirlar.append(f"• {satir}")
-                        else:
-                            # Normal paragraf - Karakter sınırını 15'e indirdik!
-                            if len(satir) > 15:
-                                temiz_satirlar.append(satir)
-                    
-                    full_text = "<br/><br/>".join(temiz_satirlar)
-
-                except Exception as e:
-                    pass
-
-                if len(full_text) < 20:
-                    full_text = "Haber detayı için kaynağa gidiniz."
+                if resim_url:
+                     resim_html = f'<img src="{resim_url}" style="width:100%; display:block;"/><br/><br/>'
 
                 # --- KAYIT ---
                 fe = fg.add_entry()
                 fe.id(link)
                 fe.link(href=link)
                 fe.title(baslik)
-                
-                if yayin_tarihi:
-                    fe.published(yayin_tarihi)
-                else:
-                    fe.published(datetime.now(pytz.timezone('Europe/Istanbul')))
-
+                fe.published(tarih)
                 fe.description(f"{resim_html}{full_text}")
                 
-                print(f"Eklendi: {baslik}")
+                print(f"Eklendi (AI): {baslik}")
                 eklenen += 1
 
             except Exception as e:
+                print(f"Hata: {e}")
                 continue
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"İŞLEM TAMAM: {eklenen} haber eklendi.")
+        print(f"İŞLEM TAMAM: {eklenen} haber analiz edildi.")
 
     except Exception as e:
         print(f"HATA: {e}")
