@@ -2,34 +2,35 @@ name: RSS Guncelle
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    # UTC Saatleri: 07:00 (TR 10:00), 09:00 (TR 12:00), 13:00 (TR 16:00)
+    - cron: '0 7,9,13 * * *'
+  workflow_dispatch: # Manuel calistirmak icin buton
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Depoyu kopyala
-        uses: actions/checkout@v3
+    - name: Depoyu Cek (Checkout)
+      uses: actions/checkout@v3
 
-      - name: Python kur
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - name: Python Kurulumu
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
 
-      - name: Kütüphaneleri yukle
-        run: |
-          pip install -r requirements.txt
+    - name: Kutuphaneleri Yukle
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: RSS Olustur
-        run: python guncelle.py
+    - name: Botu Calistir (RSS Olustur)
+      run: python guncelle.py
 
-      - name: Degisiklikleri kaydet
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git reset --soft origin/main
-          git add gdh_savunma_detayli.xml
-          git commit -m "RSS guncellendi" || echo "Degisiklik yok"
-          git push origin main --force
+    - name: Degisiklikleri Kaydet (Commit & Push)
+      run: |
+        git config --global user.name 'GitHub Action'
+        git config --global user.email 'action@github.com'
+        git add *.xml
+        git commit -m "RSS Guncellendi - $(date)" || exit 0
+        git push
