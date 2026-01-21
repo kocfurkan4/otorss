@@ -1,4 +1,6 @@
 import time
+from datetime import datetime
+import pytz 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -8,7 +10,7 @@ from feedgen.feed import FeedGenerator
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD ---
+    # --- HAYALET MOD AYARLARI ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -20,79 +22,71 @@ def haberleri_cek():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     try:
-        print("1. ADIM: Siteye giriliyor...")
+        print("Site taranıyor...")
         driver.get("https://gdh.digital/savunma")
-        time.sleep(5) # Sayfanın ilk yüklenişi
+        time.sleep(5) 
 
         haber_linkleri = []
         
-        # --- DÜZELTME 1: MANŞETLERİ KAÇIRMAMAK İÇİN İKİ AŞAMALI TARAMA ---
-        
-        # A) Önce HİÇ kaydırmadan en tepedeki (Manşet/Slider) linkleri al
-        print("   Manşetler taranıyor...")
+        # 1. LINKLERI TOPLA
+        # Once tepedeki manşetler
         linkler_tepe = driver.find_elements(By.TAG_NAME, "a")
         for el in linkler_tepe:
             try:
                 url = el.get_attribute('href')
                 if url and "/haber/" in url and url not in haber_linkleri:
                     haber_linkleri.append(url)
-            except:
-                continue
+            except: continue
 
-        # B) Şimdi sayfayı aşağı kaydır ve listenin geri kalanını al
-        print("   Aşağı iniliyor (Liste haberleri)...")
+        # Asagi kaydir ve devamini al
         driver.execute_script("window.scrollTo(0, 1500);")
         time.sleep(3)
-        
         linkler_alt = driver.find_elements(By.TAG_NAME, "a")
         for el in linkler_alt:
             try:
                 url = el.get_attribute('href')
                 if url and "/haber/" in url and url not in haber_linkleri:
                     haber_linkleri.append(url)
-            except:
-                continue
+            except: continue
         
-        print(f"Toplam {len(haber_linkleri)} benzersiz haber bulundu. İçerik çekiliyor...")
+        print(f"Toplam {len(haber_linkleri)} makale bulundu.")
 
         fg = FeedGenerator()
-        fg.title('Gdh Savunma | Tam Kapsam')
+        fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
-        fg.description('Savunma haberleri')
+        fg.description('Savunma Haberleri')
+        fg.language('tr')
 
         eklenen = 0
         
-        # 2. ADIM: İÇERİK ÇEKME
-        for link in haber_linkleri[:15]: # İlk 15 haberi al (Manşetler dahil)
+        # 2. ICERIK DETAYLANDIRMA
+        for link in haber_linkleri[:15]: 
             try:
                 driver.get(link)
                 time.sleep(2) 
                 
-                # Başlık
+                # --- BAŞLIK ---
                 try:
                     baslik = driver.find_element(By.TAG_NAME, "h1").text.strip()
-                except:
-                    continue
+                except: continue
 
-                # Resim
+                # --- RESİM ---
                 resim_html = ""
                 try:
                     img_elem = driver.find_element(By.CSS_SELECTOR, "article img, main img")
                     img_src = img_elem.get_attribute("src")
                     if img_src:
                         resim_html = f'<img src="{img_src}" style="width:100%; display:block;"/><br/><br/>'
-                except:
-                    pass
+                except: pass
 
-                # --- DÜZELTME 2: KARAKTER SINIRI GEVŞETİLDİ ---
+                # --- METİN VE TARİH ---
                 full_text = ""
+                yayin_tarihi = None 
+
                 try:
-                    # Gövdeyi bul
                     govde = None
-                    try:
-                        govde = driver.find_element(By.TAG_NAME, "article")
-                    except:
-                        govde = driver.find_element(By.TAG_NAME, "main")
+                    try: govde = driver.find_element(By.TAG_NAME, "article")
+                    except: govde = driver.find_element(By.TAG_NAME, "main")
 
                     ham_metin = govde.text 
                     satirlar = ham_metin.split('\n')
@@ -100,12 +94,29 @@ def haberleri_cek():
                     
                     for satir in satirlar:
                         satir = satir.strip()
-                        # ESKİ KOD: if len(satir) > 50 (Çok agresifti)
-                        # YENİ KOD: if len(satir) > 25 (Kısa cümleleri de alır)
-                        if len(satir) > 25 and satir != baslik:
-                            # Yasaklı kelimeler (reklam/menu vb.)
-                            if "Abone Ol" not in satir and "Takip Et" not in satir:
-                                temiz_satirlar.append(satir)
+                        
+                        # A) TARIH AYIKLAMA (Son Güncelleme: XX.XX.XXXX - XX:XX)
+                        if "Son Güncelleme" in satir:
+                            try:
+                                tarih_str = satir.replace("Son Güncelleme:", "").strip()
+                                dt = datetime.strptime(tarih_str, "%d.%m.%Y - %H:%M")
+                                tz = pytz.timezone('Europe/Istanbul')
+                                yayin_tarihi = tz.localize(dt)
+                            except: pass
+                            continue 
+
+                        # B) KESİCİ (Haber Bitişi)
+                        if "takip edebilirsiniz" in satir: 
+                            break 
+                        
+                        # C) FİLTRELER
+                        if "Kültür sanat" in satir: continue
+                        if "Abone Ol" in satir: continue
+                        if satir == baslik: continue 
+
+                        # D) Metni Ekle (Kısa cümleler dahil)
+                        if len(satir) > 25:
+                            temiz_satirlar.append(satir)
                     
                     full_text = "<br/><br/>".join(temiz_satirlar)
 
@@ -113,13 +124,19 @@ def haberleri_cek():
                     pass
 
                 if len(full_text) < 20:
-                    full_text = "Haber metni okunamadı."
+                    full_text = "İçerik detayı için habere gidin."
 
-                # Kaydet
+                # --- RSS KAYDI ---
                 fe = fg.add_entry()
                 fe.id(link)
-                fe.title(baslik)
                 fe.link(href=link)
+                fe.title(baslik)
+                
+                if yayin_tarihi:
+                    fe.published(yayin_tarihi)
+                else:
+                    fe.published(datetime.now(pytz.timezone('Europe/Istanbul')))
+
                 fe.description(f"{resim_html}{full_text}")
                 
                 print(f"Eklendi: {baslik}")
@@ -129,7 +146,7 @@ def haberleri_cek():
                 continue
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"İŞLEM TAMAM: {eklenen} haber başarıyla eklendi.")
+        print(f"İŞLEM TAMAM: {eklenen} haber eklendi.")
 
     except Exception as e:
         print(f"HATA: {e}")
