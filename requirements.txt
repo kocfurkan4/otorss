@@ -1,4 +1,7 @@
 selenium
 webdriver-manager
 feedgen
+newspaper3k
+lxml[html_clean]
+nltk
 pytz
