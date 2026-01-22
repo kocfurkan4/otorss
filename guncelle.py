@@ -10,7 +10,6 @@ from feedgen.feed import FeedGenerator
 
 def haberleri_cek():
     options = Options()
-    # --- HAYALET MOD ---
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -21,11 +20,10 @@ def haberleri_cek():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        print("Gdh Savunma taranıyor (Final Sürüm)...")
+        print("Gdh Savunma taranıyor...")
         driver.get("https://gdh.digital/savunma")
         time.sleep(5) 
 
-        # 1. LINKLERI TOPLA
         haber_linkleri = []
         elements = driver.find_elements(By.TAG_NAME, "a")
         for el in elements:
@@ -35,26 +33,18 @@ def haberleri_cek():
                     haber_linkleri.append(url)
             except: continue
         
-        print(f"{len(haber_linkleri)} link bulundu. Temizlik başlıyor...")
-
         fg = FeedGenerator()
         fg.title('Gdh Savunma')
         fg.link(href='https://gdh.digital/savunma', rel='alternate')
         fg.description('Savunma Haberleri')
         fg.language('tr')
 
-        # --- AKILLI FİLTRE LİSTELERİ ---
-        # Bunlar satırda geçiyorsa o satırı XML'e yazmaz ama okumaya devam eder
-        ignore_list = [
-            "abone ol", "paylaş", "editör", "a+a-", "son güncelleme", 
-            "gdh tv", "gdh haber", "0:00 /", "--:--"
-        ]
+        # --- FİLTRE AYARLARI ---
+        # Bu kelimeler geçiyorsa o satırı XML'den siler ama okumaya devam eder
+        ignore_list = ["abone ol", "paylaş", "editör", "a+a-", "son güncelleme", "gdh tv", "gdh haber", "nsosyal"]
         
-        # Bunlar satırda geçiyorsa "Haber Bitti" der ve okumayı durdurur
-        stop_list = [
-            "etiketler", "ilgili haberler", "gdh uygulamasını", 
-            "diğer haberler", "yorumlar", "sosyal medya", "takip edin"
-        ]
+        # Bu kelimeleri gördüğü an haber bitmiştir, alttaki reklamları almaz
+        stop_list = ["etiketler", "ilgili haberler", "gdh uygulamasını", "diğer haberler", "yorumlar"]
 
         eklenen = 0
         for link in haber_linkleri[:15]: 
@@ -68,7 +58,7 @@ def haberleri_cek():
                 temiz_satirlar = []
                 yayin_tarihi = None
 
-                # İçerik alanını tara (p, h2, h3 ve liste maddeleri)
+                # İçerik alanını bul (Article veya Main içindeki metinler)
                 govde = driver.find_element(By.CSS_SELECTOR, "main, article")
                 parçalar = govde.find_elements(By.CSS_SELECTOR, "h2, h3, p, li")
 
@@ -79,53 +69,56 @@ def haberleri_cek():
 
                     if not metin or metin == baslik: continue
 
-                    # A) TARİH ÇEKME
+                    # 1. TARİHİ ÇEK (Sadece sistem için, metne yazma)
                     if "son güncelleme" in metin_kucuk:
                         try:
-                            # Metnin sonundaki tarih kısmını al: 21.01.2026 - 13:02
                             t_str = metin.split(":")[-1].strip()
                             dt = datetime.strptime(t_str, "%d.%m.%Y - %H:%M")
                             yayin_tarihi = pytz.timezone('Europe/Istanbul').localize(dt)
                         except: pass
                         continue
 
-                    # B) DURDURUCU KONTROLÜ (Haber Sonu)
+                    # 2. DURDURUCU KONTROLÜ (Haberin sonuna gelindi mi?)
+                    # "Etiketler" veya "Uygulamayı indir" görünce haberi keser
                     if any(stop in metin_kucuk for stop in stop_list):
                         break
 
-                    # C) ATLANACAK SATIR KONTROLÜ (Butonlar, yazar isimleri vb.)
+                    # 3. ATLANACAKLAR KONTROLÜ (Editör ismi, Sosyal Medya butonu vb.)
                     if any(ignore in metin_kucuk for ignore in ignore_list):
                         continue
 
-                    # D) FORMATLAMA
+                    # 4. FORMATLAMA (Alt alta ve okunaklı düzen)
                     if tag in ['h2', 'h3']:
-                        temiz_satirlar.append(f"<b>{metin}</b>") # Ara başlıkları kalın yap
+                        # Ara başlıkları kalın yap ve önüne boşluk ekle
+                        temiz_satirlar.append(f"<br/><b>{metin}</b>")
                     elif tag == 'li':
-                        temiz_satirlar.append(f"• {metin}") # Listeleri madde yap
+                        # Liste maddelerini belirgin yap
+                        temiz_satirlar.append(f"• {metin}")
                     else:
-                        # 10 karakterden uzunsa (anlamlı cümleyse) ekle
-                        if len(metin) > 10:
+                        # Normal paragrafları olduğu gibi al
+                        if len(metin) > 20: 
                             temiz_satirlar.append(metin)
 
+                # Paragraflar arasına çift boşluk koyarak Defense News tarzı alt alta düzen oluştur
                 full_text = "<br/><br/>".join(temiz_satirlar)
 
-                # RSS Girişi Oluştur
+                # RSS Girişi
                 fe = fg.add_entry()
                 fe.id(link)
                 fe.link(href=link)
                 fe.title(baslik)
                 if yayin_tarihi: fe.published(yayin_tarihi)
                 else: fe.published(datetime.now(pytz.timezone('Europe/Istanbul')))
+                
+                # İçeriği alt alta düzenlenmiş metin olarak ekle (Fotoğraf yok)
                 fe.description(full_text) 
                 
                 print(f"Eklendi: {baslik}")
                 eklenen += 1
-            except Exception as e:
-                print(f"Haber atlandı ({link}): {e}")
-                continue
+            except: continue
 
         fg.rss_file('gdh_savunma_detayli.xml')
-        print(f"İşlem Tamamlandı: {eklenen} tertemiz haber eklendi.")
+        print(f"İşlem Tamam: {eklenen} haber Defense News tarzı okunaklı hale getirildi.")
 
     except Exception as e:
         print(f"Hata: {e}")
